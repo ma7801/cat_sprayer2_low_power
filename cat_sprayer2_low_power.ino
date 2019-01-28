@@ -1,16 +1,16 @@
 /* TODO 
  *  
  *  Code:
+ *  - Button input pin is apparently going HIGH when PIR input goes high sometimes -- probably because of a voltage spike from the motor operation or something.  Would like to resolve this with code, preferably!
  *  - Add some anti-bounce code in button ISR
- *  - Seems to be working ok, but keep testing.  Ok to run test with sprayer attached.  (undefine DEBUG if doing so)
+ *  - Seems to be working ok, but keep testing.  
+ *    - test with sprayer attached.  (undefine DEBUG if doing so)
  *  
  *  (maybe):
  *  - minimize data sizes on variables (byte = 0 to 255, unsigned short int = 0 to 65535)
  *  
  *  Hardware:
- *  - make plug for sprayer; attach to prototype circuit and test
- *  
- *  - test LED wire scratch out on the "bad" arduino board I have -- plug it into to usb (making sure no pins are touching) to test power LED doesn't turn on (TX or RX will!)
+ *  - make plug for sprayer
  *  
  *  on actual circuit board:
  *  - need to move PIR input to D2
@@ -41,7 +41,7 @@ const int enabledLEDPin = 13;
 
 const period_t sleepIterationLength = SLEEP_8S;
 const int sprayDuration = 250;   // in milliseconds
-const int disabledIterationInterval = 36; // number of 8 second "chunks" 
+const int disabledIterationInterval = 36; // in 8 second "chunks" 
 const int buttonDelay = 350; //in milliseconds
 
 volatile bool button_pressed;
@@ -50,6 +50,8 @@ int LEDOnCount;
 int remainingDisabledIterations;
 bool secondInterval;
 bool okToIdle;
+unsigned long int lastButtonPress;
+
 
 void setup() {
   #ifdef DEBUG
@@ -61,12 +63,23 @@ void setup() {
   pinMode(LED1Pin, OUTPUT);
   pinMode(LED2Pin, OUTPUT);
 
+  // Flash external LEDs to indicate power on
+  for(int i = 0; i < 2; i++) {
+    digitalWrite(LED1Pin, HIGH);
+    digitalWrite(LED2Pin, LOW);
+    delay(250);
+    digitalWrite(LED2Pin, HIGH);
+    digitalWrite(LED1Pin, LOW);
+    delay(250);
+  }
+
   // Initialize flags, etc.
   pir_triggered = false;
   LEDOnCount = 0;
   button_pressed = false;
   secondInterval = false;
   okToIdle = false;
+  lastButtonPress = millis();
 
   // Start off disabled for 2 iterations ~= 16 seconds
   remainingDisabledIterations = 2;  
@@ -80,7 +93,7 @@ void setup() {
   digitalWrite(enabledLEDPin, LOW);
 
   // Attach interrupts
-  attachInterrupt(digitalPinToInterrupt(buttonPin), buttonISR, FALLING);
+  attachInterrupt(digitalPinToInterrupt(buttonPin), buttonISR, RISING);
   attachInterrupt(digitalPinToInterrupt(pirPin), pirOnISR, RISING);
   
 }
@@ -93,6 +106,9 @@ void loop() {
     Serial.println("Sleeping for 8 seconds...");
     delay(SERIAL_DELAY);
     #endif
+
+    //Delay to improve button operation
+    delay(buttonDelay);
     
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
 
@@ -204,8 +220,11 @@ void loop() {
     #ifdef DEBUG
     Serial.println("Spray!");
     #endif
-    
+
+    #ifdef DEBUG
     digitalWrite(13, HIGH);
+    #endif
+    
     delay(sprayDuration);
 
     #ifdef DEBUG
@@ -218,14 +237,25 @@ void loop() {
   // Enter a low power idle until interrupt activated
   if(okToIdle) {
     #ifdef DEBUG
+    Serial.print("button_pressed=");
+    Serial.println(button_pressed);
+    Serial.print("millis()=");
+    Serial.println(millis());
     Serial.println("Going to idle state...");
     delay(SERIAL_DELAY);
     #endif
+
+    // Delay to improve button operation
+    delay(350);
     
     LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 
     #ifdef DEBUG
     Serial.println("Coming out of idle state...");
+    Serial.print("button_pressed=");
+    Serial.println(button_pressed);
+    Serial.print("millis()=");
+    Serial.println(millis());
     delay(SERIAL_DELAY);
     #endif
   } 
@@ -239,13 +269,25 @@ void pirOnISR() {
   #endif
 
   pir_triggered = true;
+
+  // Bug fix for button somehow getting triggered when either PIR is triggered or spray occurs:
+  delay(350);
+  button_pressed = false;
 }
 
 void buttonISR() {
-  #ifdef DEBUG 
-  Serial.println("Button input!");
-  delay(SERIAL_DELAY);
-  #endif
-
-  button_pressed = true;
+  // Wait for the button to be released
+  //while (digitalRead(buttonPin) == HIGH);
+  
+  //if(millis() - lastButtonPress > 350) {
+    //lastButtonPress = millis();
+    
+    #ifdef DEBUG 
+    Serial.println("Button input!");
+    delay(SERIAL_DELAY);
+    #endif
+    
+    //delay(buttonDelay);
+    button_pressed = true;
+  //}
 }
